@@ -1,5 +1,5 @@
 from mqtt import MQTTClientSimple
-from fasapico import *
+from settings import * # Importe les constantes WIFI et MQTT que vous aurez mis dans un fichier settings.py ou autre
 from machine import *
 import network
 import time
@@ -7,208 +7,226 @@ import ujson
 import logging
 import socket
 
-# --- Configuration Logging ---
-logging.enable_logging_types(logging.LOG_DEBUG)
+# NOTE: Pour ce script, vous devez créer un fichier `settings.py` (ou adapter directement ci-dessous)
+# avec WIFI_SSID, WIFI_PWD, SERVER_BROKER, PORT_BROKER, NOM_BATEAU
+# Par defaut j'utilise des constantes placeholders si non trouvées
 
-# --- Configuration du Projet (A MODIFIER) ---
-NOM_GROUPE = "monBateau"      # <--- METTRE LE NOM DE VOTRE GROUPE ICI
-SERVER_BROKER = "mqtt.dev.icam.school"
-PORT_BROKER = 1883            # Port standard non-SSL
+try:
+    from settings import WIFI_SSID, WIFI_PWD, SERVER_BROKER, PORT_BROKER, NOM_BATEAU
+except ImportError:
+    # Valeurs par defaut si settings.py absent (A MODIFIER IMPERATIVEMENT)
+    WIFI_SSID = "icam_iot"
+    WIFI_PWD = "Summ3#C@mp2022"
+    SERVER_BROKER = "mqtt.dev.icam.school"
+    PORT_BROKER = 1883
+    NOM_BATEAU = "monBateau01" # Idem que celui saisi dans l'App Web
+
+# --- Configuration Logging ---
+LOG_LEVEL = logging.INFO
+# Simuler logging basic si le module logging complet n'est pas dispo
+def log_info(msg): print(f"[INFO] {msg}")
+def log_err(msg): print(f"[ERROR] {msg}")
 
 # --- Topics MQTT ---
-TOPIC_BASE = f"bzh/iot/boat/{NOM_GROUPE}"  # Topic spécifique bateau
-TOPIC_CMD = f"{TOPIC_BASE}/cmd"
+TOPIC_BASE = f"bzh/iot/boat/{NOM_BATEAU}"
+TOPIC_CMD_SAFRAN = f"{TOPIC_BASE}/cmd/safran"
+TOPIC_CMD_VOILE = f"{TOPIC_BASE}/cmd/voile"
+TOPIC_CMD_LCD = f"{TOPIC_BASE}/cmd/lcd"
+
+TOPIC_CAP = f"{TOPIC_BASE}/cap"
+TOPIC_POT = f"{TOPIC_BASE}/potentiometer"
 TOPIC_STATUS = f"{TOPIC_BASE}/status"
-# On peut ajouter d'autres topics (ex: boussole, gps, batterie...)
 
-# --- Identifiants WiFi ---
-WIFI_SSID = "icam_iot"
-WIFI_PWD = "Summ3#C@mp2022"
+# --- Hardware Setup (PINS A ADAPTER) ---
 
-# --- Variables globales ---
+# 1. Servo Safran (PWM) - Pin 16
+safran_pwm = PWM(Pin(16))
+safran_pwm.freq(50) 
+# Fonction Map Servo (-90..90 deg -> duty_u16)
+# Standard Servo: 1ms (0deg) à 2ms (180deg) sur 20ms (50Hz)
+# Duty 16bit: 0..65535.  
+# 1ms = 1/20 * 65535 = 3276
+# 2ms = 2/20 * 65535 = 6553
+# Centre 1.5ms = 4915
+def set_safran_angle(angle):
+    # Angle recu: -90 (gauche) a 90 (droite). Servo attend 0..180.
+    # Centre (0) -> 90 servo.
+    servo_angle = angle + 90 
+    # Clamp 0..180
+    servo_angle = max(0, min(180, servo_angle))
+    
+    # Map 0..180 -> 1ms..2ms (approx 3000..6500)
+    # Formule simple: duty = min_duty + (angle/180) * (max_duty-min_duty)
+    duty = 3000 + (servo_angle / 180) * (6500 - 3000)
+    safran_pwm.duty_u16(int(duty))
+    log_info(f"Safran: {angle} deg -> PWM {int(duty)}")
+
+# 2. Stepper Voile (A4988 ou ULN2003) - Pins 17,18,19,20 ou Dir/Step
+# Ici exemple simple Stepper générique non-bloquant difficile en boucle simple loop.
+# On va simplifier: on suppose un moteur DC avec encoder ou juste un servo treuil pour la voile?
+# La demande parlait de "moteur pas a pas".
+# Pour simplifier l'exemple, on va piloter de maniere *virtuelle* ou via un contrôleur intelligent.
+# Si ULN2003 (28BYJ-48): Il faut séquencer les bobines.
+# Le code ci-dessous est un PLACEHOLDER qui log l'action, car piloter un stepper en parallèlle de MQTT sans thread ou asyncio est complexe.
+# On simule un servo treuil (souvent utilisé en modélisme voile) pour simplifier le code physique ici :
+voile_pwm = PWM(Pin(17)) 
+voile_pwm.freq(50)
+def set_voile_value(val):
+    # Val: 0 (Laché/Slack) .. 100 (Bordé/Taut)
+    # Mapper sur servo treuil
+    duty = 3000 + (val / 100) * (6500 - 3000)
+    voile_pwm.duty_u16(int(duty))
+    log_info(f"Voile: {val}%")
+
+
+# 3. Ecran LCD I2C (Grown/Generic 1602) - I2C0 sur Pins 0(SDA), 1(SCL)
+try:
+    from machine import I2C
+    from lcd_api import LcdApi # A ajouter sur pico
+    from i2c_lcd import I2cLcd # A ajouter sur pico
+    i2c = I2C(0, sda=Pin(0), scl=Pin(1), freq=400000)
+    # Adresse souvent 0x27 ou 0x3F. Scan auto?
+    lcd = I2cLcd(i2c, 0x27, 2, 16) # 2 lignes, 16 chars
+    lcd.putstr("Boat Ready")
+except Exception as e:
+    log_err(f"LCD Init fail (libs manquantes?): {e}")
+    lcd = None
+
+def update_lcd(text):
+    if not lcd: return
+    lcd.clear()
+    
+    # Split text auto 16 chars
+    # Si le texte contient \n on respecte, sinon on coupe
+    lines = text.split('\n')
+    if len(lines) == 1 and len(text) > 16:
+        # Auto split
+        lines = [text[:16], text[16:32]]
+    
+    # Affichage Ligne 1
+    if len(lines) > 0:
+        lcd.move_to(0,0)
+        lcd.putstr(lines[0][:16])
+        
+    # Affichage Ligne 2
+    if len(lines) > 1:
+        lcd.move_to(0,1)
+        lcd.putstr(lines[1][:16])
+    
+    log_info(f"LCD: {text}")
+
+
+# 4. Compas (HMC5883L ou QMC5883L) - I2C0
+# Simulation lecture (Remplacer par driver reel)
+def read_heading():
+    # Simule un cap qui change doucement pour test
+    # Lire registre I2C reel ici
+    import random
+    return random.randint(0, 359)
+
+# 5. Potentiometre - ADC Pin 26
+pot = ADC(26)
+def read_pot():
+    raw = pot.read_u16() # 0..65535
+    # Map to 0..100
+    return int(raw * 100 / 65535)
+
+
+
+# --- MQTT Logic ---
 clientMQTT = None
 
-# --- Configuration Moteurs (Exemple pour Driver L298N ou Shield I2C) ---
-# Vous devez adapter cette partie à votre matériel réel (fichiers Moteur.py etc)
-# Ici on simule une classe simple pour piloter 2 moteurs en PWM
-class MoteurSimple:
-    def __init__(self, pin_pwm, pin_dir1, pin_dir2):
-        self.pwm = PWM(Pin(pin_pwm))
-        self.pwm.freq(1000)
-        self.dir1 = Pin(pin_dir1, Pin.OUT)
-        self.dir2 = Pin(pin_dir2, Pin.OUT)
-        
-    def vitesse(self, val_percent): # -100 à 100
-        val_percent = max(-100, min(100, val_percent))
-        duty = int(abs(val_percent) * 65535 / 100)
-        
-        if val_percent > 0:
-            self.dir1.value(1)
-            self.dir2.value(0)
-        elif val_percent < 0:
-            self.dir1.value(0)
-            self.dir2.value(1)
-        else:
-            self.dir1.value(0)
-            self.dir2.value(0)
-            
-        self.pwm.duty_u16(duty)
-
-# Exemple de mapping pins (A AJUSTER selon votre câblage)
-# Moteur Gauche
-moteur_gauche = MoteurSimple(pin_pwm=16, pin_dir1=17, pin_dir2=18)
-# Moteur Droit
-moteur_droit = MoteurSimple(pin_pwm=19, pin_dir1=20, pin_dir2=21)
-
-def set_motor_speeds(gauche_pct, droite_pct):
-    moteur_gauche.vitesse(gauche_pct)
-    moteur_droit.vitesse(droite_pct)
-    logging.info(f"ACTION MOTEURS: G={gauche_pct:.1f}% D={droite_pct:.1f}%")
-
-# --- Fonctions de Mapping ---
-def map_value(x, in_min, in_max, out_min, out_max):
-    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
-
-def controle_differentiel(gauche_raw, droite_raw):
-    # Mapping -65535..65535 (Webapp) -> -100..100 (Pour les moteurs)
-    mg = map_value(gauche_raw, -65535, 65535, -100, 100)
-    md = map_value(droite_raw, -65535, 65535, -100, 100)
-    
-    # Sécurité bornes
-    mg = max(-100, min(100, mg))
-    md = max(-100, min(100, md))
-    
-    set_motor_speeds(mg, md)
-
-# --- Commandes Simples (Boutons ou Joystick simple) ---
-def avancer():
-    set_motor_speeds(80, 80)
-
-def reculer():
-    set_motor_speeds(-80, -80)
-
-def stop():
-    set_motor_speeds(0, 0)
-    
-def tourner_gauche(): # Rotation sur place
-    set_motor_speeds(-60, 60)
-
-def tourner_droite(): # Rotation sur place
-    set_motor_speeds(60, -60)
-
-
-# --- Callback MQTT ---
 def on_message_callback(topic, msg):
     try:
         topic_str = topic.decode()
         msg_str = msg.decode()
+        log_info(f"RX {topic_str}: {msg_str}")
         
-        if topic_str.endswith("/cmd"):
-            # 1. Essayer de décoder du JSON (Contrôle Proportionnel/Différentiel)
-            if msg_str.strip().startswith("{"):
-                try:
-                    data = ujson.loads(msg_str)
-                    # L'app web envoie souvent 'traingauche' et 'traindroit' ou 'left'/'right'
-                    # Adaptez selon ce que votre app enverra.
-                    # Basé sur mecaquad:
-                    if 'traingauche' in data and 'traindroit' in data:
-                        g = float(data['traingauche'])
-                        d = float(data['traindroit'])
-                        controle_differentiel(g, d)
-                    elif 'left' in data and 'right' in data: # Alternative fréquente
-                         g = float(data['left'])
-                         d = float(data['right'])
-                         controle_differentiel(g, d)
-
-                except Exception as e:
-                    logging.error(f"Erreur JSON: {e}")
+        if topic_str == TOPIC_CMD_SAFRAN:
+            angle = int(msg_str)
+            set_safran_angle(angle)
             
-            # 2. Commandes Simples (String)
-            else:
-                cmd = msg_str.strip()
-                if cmd == "avancer": avancer()
-                elif cmd == "reculer": reculer()
-                elif cmd == "stop": stop()
-                elif cmd == "gauche": tourner_gauche()
-                elif cmd == "droite": tourner_droite()
-                else:
-                    logging.warning(f"Commande inconnue: {cmd}")
-                    
+        elif topic_str == TOPIC_CMD_VOILE:
+            val = int(msg_str)
+            set_voile_value(val)
+            
+        elif topic_str == TOPIC_CMD_LCD:
+            update_lcd(msg_str)
+            
     except Exception as e:
-        logging.error(f"Erreur Callback: {e}")
+        log_err(f"Callback Err: {e}")
 
+def connect_mqtt():
+    global clientMQTT
+    try:
+        log_info(f"Connecting Broker {SERVER_BROKER}...")
+        client = MQTTClientSimple(
+            client_id=f"pico_{NOM_BATEAU}",
+            server=SERVER_BROKER,
+            port=PORT_BROKER
+        )
+        client.set_callback(on_message_callback)
+        client.connect()
+        
+        # Subs
+        client.subscribe(TOPIC_CMD_SAFRAN)
+        client.subscribe(TOPIC_CMD_VOILE)
+        client.subscribe(TOPIC_CMD_LCD)
+        
+        log_info("MQTT Connected & Subscribed")
+        return client
+    except Exception as e:
+        log_err(f"MQTT Connect Fail: {e}")
+        return None
 
-# --- Gestion Réseau (Copie simplifiée de Mecaquad) ---
-def connect_to_wifi(ssid, password):
+# --- Main Loop ---
+def main():
+    global clientMQTT
+    
+    # WiFi Connect
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
-    if not wlan.isconnected():
-        logging.info('Connexion WiFi...')
-        wlan.connect(ssid, password)
-        # Attente basique (mieux vaut utiliser un timeout dans une boucle réelle)
-        time.sleep(5) 
-    if wlan.isconnected():
-        logging.info(f"WiFi Connecté: {wlan.ifconfig()}")
-        return True
-    return False
-
-def publier_statut(timer):
-    global clientMQTT
-    if clientMQTT:
-        try:
-            clientMQTT.publish(TOPIC_STATUS, "Online")
-        except:
-            pass
-
-def network_check(timer):
-    global clientMQTT
-    try:
-        # Check WiFi et Reconnexion si besoin
-        if not connect_to_wifi(WIFI_SSID, WIFI_PWD):
-            logging.error("WiFi non connecté.")
-            return
-
-        # Check MQTT
-        if clientMQTT:
-            try:
-                clientMQTT.ping()
-            except:
-                logging.error("MQTT Ping fail.")
-                clientMQTT = None
-
-        # Reconnect MQTT
-        if clientMQTT is None:
-            logging.info(f"Connexion Broker {SERVER_BROKER}...")
-            client = MQTTClientSimple(
-                client_id=f"pico_boat_{NOM_GROUPE}",
-                server=SERVER_BROKER,
-                port=PORT_BROKER
-            )
-            client.set_callback(on_message_callback)
-            client.connect()
-            client.subscribe(TOPIC_CMD)
-            logging.info(f"Abonné à {TOPIC_CMD}")
-            clientMQTT = client
-
-    except Exception as e:
-        logging.error(f"Erreur Network: {e}")
-        clientMQTT = None
-
-# --- Timers ---
-Timer(mode=Timer.PERIODIC, period=5000, callback=publier_statut)
-Timer(mode=Timer.PERIODIC, period=10000, callback=network_check)
-
-# --- Démarrage ---
-logging.info("--- Démarrage Bateau IoT ---")
-network_check(None)
-
-# --- Boucle ---
-while True:
-    try:
-        if clientMQTT:
-            clientMQTT.check_msg()
-        else:
-            time.sleep(1)
-    except Exception as e:
-        logging.error(f"Main Loop Err: {e}")
+    wlan.connect(WIFI_SSID, WIFI_PWD)
+    while not wlan.isconnected():
         time.sleep(1)
+        print("WiFi...")
+    print(f"WiFi OK: {wlan.ifconfig()}")
+    
+    # MQTT Connect
+    clientMQTT = connect_mqtt()
+    
+    last_pub = 0
+    
+    while True:
+        try:
+            # Check Msg
+            if clientMQTT:
+                clientMQTT.check_msg()
+            
+            # Publie Capteurs toutes les 500ms
+            now = time.ticks_ms()
+            if time.ticks_diff(now, last_pub) > 500:
+                last_pub = now
+                
+                # Lire et Publier Cap
+                h = read_heading()
+                if clientMQTT: 
+                    clientMQTT.publish(TOPIC_CAP, str(h))
+                
+                # Lire et Publier Pot
+                p = read_pot()
+                if clientMQTT:
+                    clientMQTT.publish(TOPIC_POT, str(p))
+                    
+                # Heartbeat
+                # if clientMQTT: clientMQTT.publish(TOPIC_STATUS, "Online")
+
+        except Exception as e:
+            log_err(f"Loop Err: {e}")
+            time.sleep(1)
+            # Reconnexion sommaire
+            if clientMQTT is None: 
+                 clientMQTT = connect_mqtt()
+
+if __name__ == "__main__":
+    main()

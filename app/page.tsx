@@ -3,17 +3,19 @@
 import { useMqtt, MqttProvider } from "@/lib/mqttContext";
 import BoatControls from "@/components/BoatControls";
 import Compass from "@/components/Compass";
-import { useEffect, useState } from "react";
-import { Wifi, WifiOff, Ship, Anchor, Send, LogIn, Lock, MessageSquare } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { Wifi, Ship, Anchor, Send, LogIn, MessageSquare } from "lucide-react";
 
 function BoatDashboard() {
-  const { client, status, connect, publish, subscribe, lastMessage } = useMqtt();
+  const { status, connect, publish, subscribe, lastMessage } = useMqtt();
 
   // States
   const [boatId, setBoatId] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [lcdMessage, setLcdMessage] = useState("");
   const [sensorData, setSensorData] = useState<any>({});
+  const [lastSentTopic, setLastSentTopic] = useState<string | null>(null);
+  const [lastSentPayload, setLastSentPayload] = useState<string | null>(null);
 
   // Form State for Login
   const [tempId, setTempId] = useState("");
@@ -32,11 +34,9 @@ function BoatDashboard() {
   useEffect(() => {
     if (status === 'connected' && boatId) {
       const baseTopic = `bzh/iot/boat/${boatId}`;
-      console.log(`Subscribing to ${baseTopic}/#`);
       subscribe(`${baseTopic}/status`);
-      subscribe(`${baseTopic}/cap`);         // Compass
-      subscribe(`${baseTopic}/potentiometer`); // Pot
-      // subscribe(`${baseTopic}/#`); // Debug catch-all if needed
+      subscribe(`${baseTopic}/cap`);
+      subscribe(`${baseTopic}/potentiometer`);
     }
   }, [status, subscribe, boatId]);
 
@@ -44,11 +44,8 @@ function BoatDashboard() {
   useEffect(() => {
     if (lastMessage) {
       const topic = lastMessage.topic;
-      // Extract last part
       const parts = topic.split('/');
-      const key = parts[parts.length - 1]; // ex: 'cap', 'status', 'potentiometer'
-
-      // Update sensor data
+      const key = parts[parts.length - 1];
       setSensorData((prev: any) => ({
         ...prev,
         [key]: lastMessage.payload
@@ -56,26 +53,37 @@ function BoatDashboard() {
     }
   }, [lastMessage]);
 
+  const doPublish = (topic: string, msg: string) => {
+    publish(topic, msg);
+    setLastSentTopic(topic);
+    setLastSentPayload(msg);
+  }
+
   // Command handlers
   const handleSafran = (angle: number) => {
     if (!boatId) return;
-    publish(`bzh/iot/boat/${boatId}/cmd/safran`, angle.toString());
+    doPublish(`bzh/iot/boat/${boatId}/cmd/safran`, angle.toString());
   };
 
   const handleVoile = (val: number) => {
     if (!boatId) return;
-    publish(`bzh/iot/boat/${boatId}/cmd/voile`, val.toString());
+    doPublish(`bzh/iot/boat/${boatId}/cmd/voile`, val.toString());
   };
 
   const sendLcdMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!boatId || !lcdMessage) return;
-    // Limit to 16 chars or handle standard 8x2
-    publish(`bzh/iot/boat/${boatId}/cmd/lcd`, lcdMessage);
-    setLcdMessage(""); // Clear after send? Or keep? Let's clear.
+
+    // Auto-split lines logic if needed by user, but let's just send raw first. 
+    // Python script will handle splitting based on length.
+    // Or we do simple splitting here for visual consistency? 
+    // Let's send the raw text, python handles display.
+    doPublish(`bzh/iot/boat/${boatId}/cmd/lcd`, lcdMessage);
+
+    // Clear handled by user pref? Let's keep it to allow correcting a typo easily.
+    setLcdMessage("");
   };
 
-  // Login Screen
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -118,17 +126,17 @@ function BoatDashboard() {
   return (
     <main className="min-h-screen bg-slate-900 text-white pb-20 font-sans overflow-x-hidden">
 
-      {/* Header Content */}
-      <header className="bg-slate-800/50 backdrop-blur-md sticky top-0 z-50 border-b border-white/5 px-4 py-3 pb-6 md:pb-3 md:px-8 flex flex-col md:flex-row justify-between md:items-center gap-4">
+      {/* Header */}
+      <header className="bg-slate-800/50 backdrop-blur-md sticky top-0 z-50 border-b border-white/5 px-4 py-3 flex flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${status === 'connected' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-          <h1 className="font-bold text-lg tracking-tight">Boat Control <span className="text-blue-400 font-mono">@{boatId}</span></h1>
+          <h1 className="font-bold text-lg tracking-tight">Boat <span className="text-blue-400 font-mono">@{boatId}</span></h1>
         </div>
 
         {/* Status Badge */}
         <div className="flex gap-2 text-xs font-mono">
-          <span className="px-2 py-1 bg-white/5 rounded border border-white/10">
-            {status === 'connected' ? 'ONLINE' : 'OFFLINE'}
+          <span className="px-2 py-1 bg-white/5 rounded border border-white/10 hidden sm:inline-block">
+            {status === 'connected' ? 'CONNECTED' : 'WAITING...'}
           </span>
         </div>
       </header>
@@ -139,17 +147,18 @@ function BoatDashboard() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
           {/* Compass Card */}
-          <div className="col-span-2 bg-slate-800/40 rounded-2xl p-6 border border-white/5 flex flex-col items-center justify-center gap-4 relative overflow-hidden">
+          <div className="col-span-2 bg-slate-800/40 rounded-2xl p-6 border border-white/5 flex flex-col items-center justify-center gap-4 relative overflow-hidden h-64">
             <div className="absolute top-3 left-4 text-xs font-mono text-white/30 uppercase">Compas Magnétique</div>
             <Compass heading={parseInt(sensorData.cap || 0)} />
             <div className="font-mono text-2xl font-bold">{sensorData.cap || 0}°</div>
+            <div className="absolute bottom-2 text-[10px] text-white/20 break-all">Topic: bzh/iot/boat/{boatId}/cap</div>
           </div>
 
           {/* Potentiometer Card */}
-          <div className="col-span-2 bg-slate-800/40 rounded-2xl p-6 border border-white/5 flex flex-col items-center justify-center gap-4 relative overflow-hidden">
+          <div className="col-span-2 bg-slate-800/40 rounded-2xl p-6 border border-white/5 flex flex-col items-center justify-center gap-4 relative overflow-hidden h-64">
             <div className="absolute top-3 left-4 text-xs font-mono text-white/30 uppercase">Potentiomètre</div>
 
-            {/* Gauge Visualization */}
+            {/* Gauge */}
             <div className="relative w-32 h-32 flex items-center justify-center">
               <svg className="w-full h-full transform -rotate-90">
                 <circle cx="64" cy="64" r="56" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-700" />
@@ -158,59 +167,59 @@ function BoatDashboard() {
                   stroke="currentColor" strokeWidth="8" fill="transparent"
                   className="text-orange-500 transition-all duration-300 ease-out"
                   strokeDasharray={351}
-                  strokeDashoffset={351 - (351 * parseInt(sensorData.potentiometer || 0) / 100)} // Assuming 0-100 or map accordingly
+                  strokeDashoffset={351 - (351 * parseInt(sensorData.potentiometer || 0) / 100)}
                 />
               </svg>
               <span className="absolute text-2xl font-bold font-mono text-orange-400">{sensorData.potentiometer || 0}</span>
             </div>
-            <div className="text-xs text-white/30 text-center px-4 w-full">Topic: .../potentiometer</div>
+            <div className="absolute bottom-2 text-[10px] text-white/20 break-all">Topic: bzh/iot/boat/{boatId}/potentiometer</div>
           </div>
         </div>
 
         {/* Controls Section */}
         <div>
-          <h2 className="text-white/40 text-sm font-bold uppercase tracking-wider mb-4 ml-1">Commandes Actuateurs</h2>
-          <BoatControls onSafranUpdate={handleSafran} onVoileUpdate={handleVoile} disabled={status !== 'connected'} />
+          <h2 className="text-white/40 text-sm font-bold uppercase tracking-wider mb-4 ml-1">Actuateurs</h2>
+          <BoatControls onSafranUpdate={handleSafran} onVoileUpdate={handleVoile} boatId={boatId} disabled={status !== 'connected'} />
         </div>
 
         {/* LCD Display Section */}
         <div className="bg-slate-800/40 rounded-2xl p-6 border border-white/5">
           <div className="flex items-center gap-2 mb-4">
             <MessageSquare size={18} className="text-purple-400" />
-            <h3 className="font-semibold text-white/90">LCD Messenger</h3>
+            <h3 className="font-semibold text-white/90">Emetteur LCD</h3>
           </div>
 
-          <form onSubmit={sendLcdMessage} className="flex gap-2">
-            <input
-              type="text"
-              maxLength={16}
+          <form onSubmit={sendLcdMessage} className="gap-2 flex flex-col">
+            <textarea
+              maxLength={32}
               value={lcdMessage}
               onChange={(e) => setLcdMessage(e.target.value)}
-              placeholder="Message (max 16 chars)..."
-              className="flex-1 bg-black/30 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-purple-500 transition-colors"
+              placeholder={"Message LCD (Max 32 chars)\nSaut de ligne auto si > 16 chars"}
+              rows={2}
+              className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-purple-500 transition-colors resize-none"
             />
-            <button
-              type="submit"
-              disabled={!lcdMessage || status !== 'connected'}
-              className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 rounded-xl transition-colors flex items-center justify-center"
-            >
-              <Send size={18} />
-            </button>
+            <div className="flex justify-between items-center mt-2">
+              <span className="text-xs text-white/30">{lcdMessage.length}/32 caractères</span>
+              <button
+                type="submit"
+                disabled={!lcdMessage || status !== 'connected'}
+                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <Send size={16} /> Envoyer
+              </button>
+            </div>
           </form>
-          <p className="text-xs text-white/20 mt-2 font-mono ml-1">Topic: bzh/iot/boat/{boatId}/cmd/lcd</p>
+          <p className="text-[10px] text-white/20 mt-2 font-mono break-all text-center">Topic: bzh/iot/boat/{boatId}/cmd/lcd</p>
         </div>
 
-        {/* Debug / Topics Info Footer */}
-        <div className="mt-12 pt-8 border-t border-white/5">
-          <h4 className="text-xs font-bold text-white/30 uppercase tracking-wider mb-4">Configuration MQTT Topics</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono text-white/50 bg-black/20 p-4 rounded-xl">
-            <div className="flex justify-between border-b border-white/5 pb-2"><span>Servo (Safran)</span> <span className="text-blue-300">.../{boatId}/cmd/safran</span></div>
-            <div className="flex justify-between border-b border-white/5 pb-2"><span>Stepper (Voile)</span> <span className="text-blue-300">.../{boatId}/cmd/voile</span></div>
-            <div className="flex justify-between border-b border-white/5 pb-2"><span>LCD Text</span> <span className="text-purple-300">.../{boatId}/cmd/lcd</span></div>
-            <div className="flex justify-between border-b border-white/5 pb-2"><span>Compass (Cap)</span> <span className="text-green-300">.../{boatId}/cap</span></div>
-            <div className="flex justify-between"><span>Potentiometre</span> <span className="text-orange-300">.../{boatId}/potentiometer</span></div>
+        {/* Debug Footer: Dernière commande */}
+        {lastSentTopic && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 shadow-xl flex items-center gap-3 text-xs font-mono max-w-[90vw] whitespace-nowrap overflow-hidden text-ellipsis z-50 animate-in fade-in slide-in-from-bottom-4">
+            <span className="text-green-400 font-bold">TX &rarr;</span>
+            <span className="text-white/50">{lastSentTopic.split('/').pop()}:</span>
+            <span className="text-white font-bold max-w-[150px] truncate">{lastSentPayload}</span>
           </div>
-        </div>
+        )}
 
       </div>
     </main>
