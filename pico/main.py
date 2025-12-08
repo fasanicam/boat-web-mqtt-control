@@ -1,11 +1,13 @@
 from mqtt import MQTTClientSimple
 # from settings import * # Settings specifiques non fournis ici pour reference, on utilise des vars locales si besoin
 from machine import *
-import network
 import time
 import ujson
 import logging
-import socket
+# --- IMPORT FASAPICO ---
+from fasapico import connect_to_wifi, scale_to_int
+# --- IMPORT GROVE LCD ---
+from grove_lcd_i2c import Grove_LCD_I2C
 
 # --- CONSTANTES A ADAPTER ---
 try:
@@ -40,32 +42,31 @@ def set_servo_angle(pwm_obj, angle):
     # Angle -90..90 -> Servo 0..180
     servo_angle = angle + 90
     servo_angle = max(0, min(180, servo_angle))
-    # Map 0..180 -> 3000..6500 (approx 1ms-2ms)
-    duty = 3000 + (servo_angle / 180) * (6500 - 3000)
-    pwm_obj.duty_u16(int(duty))
+    # Map 0..180 -> 3000..6500 (approx 1ms-2ms) via float calculation or helpers
+    duty = int(3000 + (servo_angle / 180) * (6500 - 3000))
+    pwm_obj.duty_u16(duty)
 
 # 2. Servo Voile (Pin 17) - Commandé en Angle maintenant
 voile_pwm = PWM(Pin(17))
 voile_pwm.freq(50)
 
-# 3. LCD I2C (Pins 0/1)
+# 3. LCD I2C (Pins 0/1) - Via Grove_LCD_I2C
 lcd = None
 try:
-    from machine import I2C
-    from lcd_api import LcdApi 
-    from i2c_lcd import I2cLcd 
-    i2c = I2C(0, sda=Pin(0), scl=Pin(1), freq=400000)
-    lcd = I2cLcd(i2c, 0x27, 2, 16) 
-    lcd.putstr("Ready")
-except:
-    log_err("LCD Fail")
+    # Init Grove LCD (sda=0, scl=1 sur Pico standard souvent I2C0)
+    # Attention: Grove_LCD_I2C init utilise SoftI2C par defaut dans la lib fasapico sur pins 4,5
+    # On doit forcer pins 0,1 si c'est le cablage. 
+    # La classe Grove_LCD_I2C prend sda_pin et scl_pin en argument.
+    lcd = Grove_LCD_I2C(sda_pin=0, scl_pin=1)
+    lcd.write("Ready")
+except Exception as e:
+    log_err(f"LCD Fail: {e}")
 
 def update_lcd(text):
     if not lcd: return
     lcd.clear()
     
     # Gestion du saut de ligne manuel ou auto deja fait par l'app web ou ici
-    # Si le texte contient \n on respecte
     lines = text.split('\n')
     
     # Si pas de \n mais > 16 chars, on split auto ici aussi par sécurité
@@ -73,11 +74,11 @@ def update_lcd(text):
         lines = [text[:16], text[16:32]]
         
     if len(lines) > 0:
-        lcd.move_to(0,0)
-        lcd.putstr(lines[0][:16])
+        lcd.cursor_position(0, 0)
+        lcd.write(lines[0][:16])
     if len(lines) > 1:
-        lcd.move_to(0,1)
-        lcd.putstr(lines[1][:16])
+        lcd.cursor_position(0, 1)
+        lcd.write(lines[1][:16])
     
     log_info(f"LCD: {text}")
 
@@ -88,7 +89,9 @@ def read_heading():
 
 pot = ADC(26)
 def read_pot():
-    return int(pot.read_u16() * 100 / 65535)
+    # Avec fasapico.scale_to_int
+    raw = pot.read_u16()
+    return scale_to_int(raw, 0, 65535, 0, 100)
 
 # --- MQTT Logic ---
 clientMQTT = None
@@ -127,11 +130,15 @@ def connect_mqtt():
 # --- Main ---
 def main():
     global clientMQTT
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(WIFI_SSID, WIFI_PWD)
-    while not wlan.isconnected(): time.sleep(1)
     
+    # WiFi Connect via fasapico helper
+    try:
+        connect_to_wifi(WIFI_SSID, WIFI_PWD, debug=True)
+    except Exception as e:
+        log_err(f"WiFi Fail: {e}")
+        time.sleep(5)
+        return # Ou reboot
+
     clientMQTT = connect_mqtt()
     last_pub = 0
     
