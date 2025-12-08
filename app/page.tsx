@@ -181,7 +181,7 @@ function BoatDashboard() {
 
         {/* Controls Section */}
         <div>
-          <h2 className="text-white/40 text-sm font-bold uppercase tracking-wider mb-4 ml-1">Actuateurs</h2>
+          <h2 className="text-white/40 text-sm font-bold uppercase tracking-wider mb-4 ml-1">Actionneurs</h2>
           <BoatControls onSafranUpdate={handleSafran} onVoileUpdate={handleVoile} boatId={boatId} disabled={status !== 'connected'} />
         </div>
 
