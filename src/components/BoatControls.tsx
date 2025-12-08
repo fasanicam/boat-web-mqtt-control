@@ -5,14 +5,14 @@ import { Wind, Navigation } from 'lucide-react';
 
 interface BoatControlsProps {
     onSafranUpdate: (angle: number) => void;
-    onVoileUpdate: (value: number) => void;
-    boatId: string; // Pour affichage des topics
+    onVoileUpdate: (angle: number) => void;
+    boatId: string;
     disabled?: boolean;
 }
 
 export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, disabled }: BoatControlsProps) {
     const [safran, setSafran] = useState(0); // -90 (G) to 90 (D)
-    const [voile, setVoile] = useState(0);   // 0 (Fermé) to 100 (Ouvert)
+    const [voile, setVoile] = useState(0);   // -90 to 90 now (Orientation)
 
     const handleSafranChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = parseInt(e.target.value);
@@ -23,7 +23,7 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
     const handleVoileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = parseInt(e.target.value);
         setVoile(val);
-        onVoileUpdate(val); // Reste 0-100 pour la valeur mais l'UI est horizontale maintenant
+        onVoileUpdate(val);
     };
 
     return (
@@ -33,7 +33,7 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
             <div className="bg-white/5 backdrop-blur-sm p-6 rounded-2xl border border-white/10 flex flex-col items-center gap-4">
                 <div className="flex items-center gap-2 text-white/80 mb-2">
                     <Navigation size={24} className="text-green-300 transform rotate-90" />
-                    <span className="font-semibold text-lg">Safran (Direction)</span>
+                    <span className="font-semibold text-lg">Safran (Angle)</span>
                 </div>
 
                 <div className="w-full flex flex-col justify-center items-center gap-6">
@@ -73,22 +73,32 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
                     Recentrer Safran
                 </button>
                 <div className="text-[10px] sm:text-xs text-white/20 font-mono mt-2 break-all text-center">
-                    Topic: bzh/iot/boat/{boatId}/cmd/safran
+                    Topic: .../actionneurs/safran
                 </div>
             </div>
 
-            {/* Contrôle Voile (Stepper) - Maintenant Horizontal comme Safran */}
+            {/* Contrôle Voile - Maintenant Angle -90 à 90 */}
             <div className="bg-white/5 backdrop-blur-sm p-6 rounded-2xl border border-white/10 flex flex-col items-center gap-4">
                 <div className="flex items-center gap-2 text-white/80 mb-2">
                     <Wind size={24} className="text-blue-300" />
-                    <span className="font-semibold text-lg">Voile (Intensité)</span>
+                    <span className="font-semibold text-lg">Voile (Angle)</span>
                 </div>
 
                 <div className="w-full flex flex-col justify-center items-center gap-6">
+                    {/* Visual Indication Similaire Safran mais Bleu */}
+                    <div className="relative w-32 h-16 border-b-2 border-white/10 overflow-hidden">
+                        <div
+                            className="absolute bottom-0 left-1/2 w-1 h-12 bg-blue-500 origin-bottom transition-transform duration-200"
+                            style={{ transform: `translateX(-50%) rotate(${voile}deg)` }}
+                        ></div>
+                        {/* Petit mât fixe */}
+                        <div className="absolute bottom-0 left-1/2 w-1 h-4 bg-white/50 -translate-x-1/2"></div>
+                    </div>
+
                     <input
                         type="range"
-                        min="0"
-                        max="100"
+                        min="-90"
+                        max="90"
                         step="1"
                         value={voile}
                         onChange={handleVoileChange}
@@ -99,13 +109,20 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
                                    cursor-pointer transition-all hover:[&::-webkit-slider-thumb]:bg-blue-400"
                     />
                     <div className="flex justify-between w-full text-xs text-white/40 font-mono">
-                        <span>0% (Slack)</span>
-                        <span className="text-blue-300 font-bold text-lg">{voile}%</span>
-                        <span>100% (Taut)</span>
+                        <span>-90°</span>
+                        <span className="text-blue-300 font-bold text-lg">{voile}°</span>
+                        <span>+90°</span>
                     </div>
                 </div>
+
+                <button
+                    onClick={() => { setVoile(0); onVoileUpdate(0); }}
+                    className="mt-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors text-white/70"
+                >
+                    Recentrer Voile
+                </button>
                 <div className="text-[10px] sm:text-xs text-white/20 font-mono mt-2 break-all text-center">
-                    Topic: bzh/iot/boat/{boatId}/cmd/voile
+                    Topic: .../actionneurs/voile
                 </div>
             </div>
 

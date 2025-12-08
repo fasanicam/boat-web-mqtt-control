@@ -3,8 +3,8 @@
 import { useMqtt, MqttProvider } from "@/lib/mqttContext";
 import BoatControls from "@/components/BoatControls";
 import Compass from "@/components/Compass";
-import { useEffect, useState, useRef } from "react";
-import { Wifi, Ship, Anchor, Send, LogIn, MessageSquare } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Ship, Anchor, Send, LogIn, MessageSquare } from "lucide-react";
 
 function BoatDashboard() {
   const { status, connect, publish, subscribe, lastMessage } = useMqtt();
@@ -34,9 +34,11 @@ function BoatDashboard() {
   useEffect(() => {
     if (status === 'connected' && boatId) {
       const baseTopic = `bzh/iot/boat/${boatId}`;
+      const capteursTopic = `${baseTopic}/capteurs`;
+
       subscribe(`${baseTopic}/status`);
-      subscribe(`${baseTopic}/cap`);
-      subscribe(`${baseTopic}/potentiometer`);
+      subscribe(`${capteursTopic}/cap`);
+      subscribe(`${capteursTopic}/potentiometer`);
     }
   }, [status, subscribe, boatId]);
 
@@ -62,25 +64,26 @@ function BoatDashboard() {
   // Command handlers
   const handleSafran = (angle: number) => {
     if (!boatId) return;
-    doPublish(`bzh/iot/boat/${boatId}/cmd/safran`, angle.toString());
+    doPublish(`bzh/iot/boat/${boatId}/actionneurs/safran`, angle.toString());
   };
 
-  const handleVoile = (val: number) => {
+  const handleVoile = (angle: number) => {
     if (!boatId) return;
-    doPublish(`bzh/iot/boat/${boatId}/cmd/voile`, val.toString());
+    doPublish(`bzh/iot/boat/${boatId}/actionneurs/voile`, angle.toString());
   };
 
   const sendLcdMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!boatId || !lcdMessage) return;
 
-    // Auto-split lines logic if needed by user, but let's just send raw first. 
-    // Python script will handle splitting based on length.
-    // Or we do simple splitting here for visual consistency? 
-    // Let's send the raw text, python handles display.
-    doPublish(`bzh/iot/boat/${boatId}/cmd/lcd`, lcdMessage);
+    // Auto passage ligne logic
+    let formattedMsg = lcdMessage;
+    if (lcdMessage.length > 16 && !lcdMessage.includes('\n')) {
+      // Si pas de saut de ligne manuel et > 16, on coupe a 16
+      formattedMsg = lcdMessage.slice(0, 16) + '\n' + lcdMessage.slice(16);
+    }
 
-    // Clear handled by user pref? Let's keep it to allow correcting a typo easily.
+    doPublish(`bzh/iot/boat/${boatId}/actionneurs/lcd`, formattedMsg);
     setLcdMessage("");
   };
 
@@ -151,7 +154,7 @@ function BoatDashboard() {
             <div className="absolute top-3 left-4 text-xs font-mono text-white/30 uppercase">Compas Magnétique</div>
             <Compass heading={parseInt(sensorData.cap || 0)} />
             <div className="font-mono text-2xl font-bold">{sensorData.cap || 0}°</div>
-            <div className="absolute bottom-2 text-[10px] text-white/20 break-all">Topic: bzh/iot/boat/{boatId}/cap</div>
+            <div className="absolute bottom-2 text-[10px] text-white/20 break-all">Topic: .../capteurs/cap</div>
           </div>
 
           {/* Potentiometer Card */}
@@ -172,7 +175,7 @@ function BoatDashboard() {
               </svg>
               <span className="absolute text-2xl font-bold font-mono text-orange-400">{sensorData.potentiometer || 0}</span>
             </div>
-            <div className="absolute bottom-2 text-[10px] text-white/20 break-all">Topic: bzh/iot/boat/{boatId}/potentiometer</div>
+            <div className="absolute bottom-2 text-[10px] text-white/20 break-all">Topic: .../capteurs/potentiometer</div>
           </div>
         </div>
 
@@ -186,7 +189,7 @@ function BoatDashboard() {
         <div className="bg-slate-800/40 rounded-2xl p-6 border border-white/5">
           <div className="flex items-center gap-2 mb-4">
             <MessageSquare size={18} className="text-purple-400" />
-            <h3 className="font-semibold text-white/90">Emetteur LCD</h3>
+            <h3 className="font-semibold text-white/90">Ecran LCD</h3>
           </div>
 
           <form onSubmit={sendLcdMessage} className="gap-2 flex flex-col">
@@ -194,7 +197,7 @@ function BoatDashboard() {
               maxLength={32}
               value={lcdMessage}
               onChange={(e) => setLcdMessage(e.target.value)}
-              placeholder={"Message LCD (Max 32 chars)\nSaut de ligne auto si > 16 chars"}
+              placeholder={"Message (Max 32 chars). Saut ligne auto > 16 chars."}
               rows={2}
               className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-purple-500 transition-colors resize-none"
             />
@@ -209,14 +212,14 @@ function BoatDashboard() {
               </button>
             </div>
           </form>
-          <p className="text-[10px] text-white/20 mt-2 font-mono break-all text-center">Topic: bzh/iot/boat/{boatId}/cmd/lcd</p>
+          <p className="text-[10px] text-white/20 mt-2 font-mono break-all text-center">Topic: .../actionneurs/lcd</p>
         </div>
 
         {/* Debug Footer: Dernière commande */}
         {lastSentTopic && (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 shadow-xl flex items-center gap-3 text-xs font-mono max-w-[90vw] whitespace-nowrap overflow-hidden text-ellipsis z-50 animate-in fade-in slide-in-from-bottom-4">
             <span className="text-green-400 font-bold">TX &rarr;</span>
-            <span className="text-white/50">{lastSentTopic.split('/').pop()}:</span>
+            <span className="text-white/50">{lastSentTopic.split('/').slice(-2).join('/')}:</span>
             <span className="text-white font-bold max-w-[150px] truncate">{lastSentPayload}</span>
           </div>
         )}
