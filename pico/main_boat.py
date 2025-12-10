@@ -68,19 +68,20 @@ def update_lcd(text):
         lcd.cursor_position(0, 1)
         lcd.write(lines[1][:16])
 
-# Boussole (BMM150)
-compass = None
+# Boussole (capteur magnétique BMM150)
+boussole = None
 try:
-    compass = bmm150_I2C(sdaPin=0, sclPin=1)
+    boussole = Boussole(sdaPin=0, sclPin=1)
     info("Boussole initialisee OK")
 except Exception as e:
     error(f"Init Boussole: {e}")
 
-def read_heading():
-    if not compass:
+def lire_cap():
+    """Retourne le cap de la boussole en degrés (0-360)"""
+    if not boussole:
         return None
     try:
-        return int(compass.get_compass_degree())
+        return int(boussole.get_compass_degree())
     except Exception as e:
         error(f"Lecture boussole: {e}")
         return None
@@ -124,7 +125,7 @@ def deplacer_voile(cible):
 def publish_sensors(timer):
     if not client_mqtt: return
     try:
-        cap = read_heading()
+        cap = lire_cap()
         if cap is not None:
             client_mqtt.publish(TOPIC_CAP, str(cap))
         client_mqtt.publish(TOPIC_POT, str(read_pot()))
