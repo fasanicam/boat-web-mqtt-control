@@ -18,7 +18,6 @@ export default function Compass({ heading }: CompassProps) {
             {/* Aiguille / Indicateur */}
             <div
                 className="w-full h-full absolute transition-transform duration-500 ease-out flex justify-center p-2"
-                style={{ transform: `rotate(${-heading}deg)` }}
             >
                 {/* L'aiguille pointe vers le Nord (fixe ici par rapport au repère rotatif, ou inversement ?) 
                     Si 'heading' est le cap du bateau, la boussole tourne pour montrer le Nord relative.
