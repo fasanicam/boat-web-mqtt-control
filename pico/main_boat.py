@@ -192,8 +192,8 @@ def main():
     clientMQTT = connect_mqtt()
     
     # Timers
-    # Check MQTT every 100ms
-    t_mqtt = Timer(period=100, mode=Timer.PERIODIC, callback=check_msg_task)
+    # Check MQTT every 10ms
+    t_mqtt = Timer(period=10, mode=Timer.PERIODIC, callback=check_msg_task)
     # Publish every 1s
     t_pub = Timer(period=1000, mode=Timer.PERIODIC, callback=publish_sensors_task)
     
