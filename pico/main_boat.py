@@ -111,7 +111,7 @@ def read_heading():
 pot = ADC(27)
 def read_pot():
     raw = pot.read_u16()
-    return scale_to_int(raw, 0, 65535, 0, 100) # 0-100%
+    return scale_to_int(raw, 0, 65535, 100, 0) # 0-100%
 
 # --- MQTT Logic ---
 clientMQTT = None
