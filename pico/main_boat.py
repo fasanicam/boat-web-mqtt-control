@@ -71,18 +71,19 @@ def update_lcd(text):
 # Boussole (BMM150)
 compass = None
 try:
-    compass = bmm150(sdaPin=0, sclPin=1)
-    if compass.sensor_init() == 0:
-        compass.set_operation_mode(bmm150.POWERMODE_NORMAL)
+    compass = bmm150_I2C(sdaPin=0, sclPin=1)
+    info("Boussole initialisee OK")
 except Exception as e:
     error(f"Init Boussole: {e}")
 
 def read_heading():
-    if not compass: return 0
+    if not compass:
+        return None
     try:
         return int(compass.get_compass_degree())
-    except:
-        return 0
+    except Exception as e:
+        error(f"Lecture boussole: {e}")
+        return None
 
 # Potentiometre
 pot = ADC(27)
@@ -121,22 +122,28 @@ def deplacer_voile(cible):
 
 # --- Fonctions Timer ---
 def publish_sensors(timer):
+    if not client_mqtt: return
     try:
-        client_mqtt.publish(TOPIC_CAP, read_heading())
-        client_mqtt.publish(TOPIC_POT, read_pot())
+        cap = read_heading()
+        if cap is not None:
+            client_mqtt.publish(TOPIC_CAP, str(cap))
+        client_mqtt.publish(TOPIC_POT, str(read_pot()))
     except Exception as e:
         error(f"Publication: {e}")
 
 def publier_statut(timer):
-    client_mqtt.publish(TOPIC_STATUS, "Online")
+    if not client_mqtt: return
+    try:
+        client_mqtt.publish(TOPIC_STATUS, "Online")
+    except Exception as e:
+        error(f"Statut: {e}")
 
 def network_check(timer):
-    client_mqtt.check_connection()
-
-# --- Timers ---
-Timer(mode=Timer.PERIODIC, period=1000, callback=publish_sensors)
-Timer(mode=Timer.PERIODIC, period=5000, callback=publier_statut)
-Timer(mode=Timer.PERIODIC, period=10000, callback=network_check)
+    if not client_mqtt: return
+    try:
+        client_mqtt.check_connection()
+    except Exception as e:
+        error(f"Network: {e}")
 
 # --- Init Client MQTT ---
 # On utilise un wildcard pour s'abonner à tous les actionneurs
@@ -153,6 +160,11 @@ client_mqtt = ClientMQTT(
 # --- Demarrage ---
 info("--- Demarrage Bateau IoT ---")
 network_check(None)
+
+# --- Timers (apres init client) ---
+Timer(mode=Timer.PERIODIC, period=1000, callback=publish_sensors)
+Timer(mode=Timer.PERIODIC, period=5000, callback=publier_statut)
+Timer(mode=Timer.PERIODIC, period=10000, callback=network_check)
 
 # --- Boucle Principale ---
 while True:
