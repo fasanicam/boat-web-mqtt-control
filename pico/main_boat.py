@@ -41,6 +41,7 @@ def set_servo_angle(pwm_obj, angle):
 
 # 2. Moteur Pas-a-pas Voile (Pins 10, 11, 12, 13 via classe Stepper)
 voile = Stepper() # Utilise les pins par defaut 10, 11, 12, 13
+position_actuelle_voile = 0
 
 # 3. LCD I2C (Pins 0/1)
 lcd = None
@@ -105,22 +106,33 @@ def on_message_callback(topic, msg):
         if topic_str == TOPIC_ACT_SAFRAN:
             set_servo_angle(safran_pwm, int(float(msg_str)))
         elif topic_str == TOPIC_ACT_VOILE:
-            voile.move(int(float(msg_str)))
+            deplacer_voile(msg_str)
         elif topic_str == TOPIC_ACT_LCD:
             update_lcd(msg_str)
         elif topic_str == TOPIC_ACT_MAT:
-            voile.move(int(float(msg_str)))
+             deplacer_voile(msg_str)
         
         # Support format exemple utilsateur: "mat|30"
         if "mat" in msg_str and "|" in msg_str:
              parts = msg_str.split('|')
-             if parts[0] == "mat": voile.move(int(float(parts[1])))
+             if parts[0] == "mat": deplacer_voile(parts[1])
         if "lcd" in msg_str and "|" in msg_str:
              parts = msg_str.split('|')
              if parts[0] == "lcd": update_lcd(parts[1])
              
     except Exception as e:
         print(f"[ERREUR] Callback: {e}")
+
+def deplacer_voile(cible):
+    global position_actuelle_voile
+    try:
+        cible = int(float(cible))
+        delta = cible - position_actuelle_voile
+        print(f"Deplacement mat: {delta} pas (Cible: {cible}, Actuel: {position_actuelle_voile})")
+        voile.move(delta)
+        position_actuelle_voile = cible
+    except Exception as e:
+         print(f"[ERREUR] Deplacement Voile: {e}")
 
 def connect_mqtt():
     global clientMQTT

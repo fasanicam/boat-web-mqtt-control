@@ -14,17 +14,7 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
     const [safran, setSafran] = useState(0); // -90 (G) to 90 (D)
     const [voile, setVoile] = useState(0);   // -90 to 90 now (Orientation)
 
-    const handleSafranChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = parseInt(e.target.value);
-        setSafran(val);
-        onSafranUpdate(val);
-    };
 
-    const handleVoileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = parseInt(e.target.value);
-        setVoile(val);
-        onVoileUpdate(val);
-    };
 
     return (
         <div className="grid grid-cols-1 gap-8 w-full">
@@ -51,7 +41,9 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
                         max="90"
                         step="1"
                         value={safran}
-                        onChange={handleSafranChange}
+                        onChange={(e) => setSafran(parseInt(e.target.value))}
+                        onMouseUp={() => onSafranUpdate(safran)}
+                        onTouchEnd={() => onSafranUpdate(safran)}
                         disabled={disabled}
                         className="w-full h-12 appearance-none rounded-xl bg-slate-700/50 outline-none 
                                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-12 [&::-webkit-slider-thumb]:w-8 
@@ -101,7 +93,9 @@ export default function BoatControls({ onSafranUpdate, onVoileUpdate, boatId, di
                         max="90"
                         step="1"
                         value={voile}
-                        onChange={handleVoileChange}
+                        onChange={(e) => setVoile(parseInt(e.target.value))}
+                        onMouseUp={() => onVoileUpdate(voile)}
+                        onTouchEnd={() => onVoileUpdate(voile)}
                         disabled={disabled}
                         className="w-full h-12 appearance-none rounded-xl bg-slate-700/50 outline-none 
                                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-12 [&::-webkit-slider-thumb]:w-8 
