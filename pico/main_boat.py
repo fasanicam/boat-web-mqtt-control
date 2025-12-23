@@ -6,18 +6,11 @@ from fasapico import *
 enable_logging_types(LOG_DEBUG)
 
 # --- Configuration du Projet ---
-try:
-    from secrets import ssid as WIFI_SSID, password as WIFI_PWD, mqtt_broker as SERVER_BROKER, mqtt_port as PORT_BROKER
-    try:
-        from secrets import nom_bateau as NOM_BATEAU
-    except ImportError:
-        NOM_BATEAU = "monBateau"
-except ImportError:
-    WIFI_SSID = "icam_iot"
-    WIFI_PWD = "Summ3#C@mp2022"
-    SERVER_BROKER = "mqtt.dev.icam.school"
-    PORT_BROKER = 1883
-    NOM_BATEAU = "monBateau"
+NOM_BATEAU = "monBateau"
+WIFI_SSID = "icam_iot"
+WIFI_PWD = "Summ3#C@mp2022"
+SERVER_BROKER = "mqtt.dev.icam.school"
+PORT_BROKER = 1883
 
 # --- Topics MQTT ---
 TOPIC_BASE = f"bzh/iot/boat/{NOM_BATEAU}"
@@ -174,3 +167,4 @@ while True:
     except Exception as e:
         error(f"Main Loop: {e}")
         time.sleep(1)
+
